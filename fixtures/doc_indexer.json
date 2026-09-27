@@ -1,0 +1,197 @@
+{
+  "$schema": "https://onboardflow.dev/schemas/v1/blueprint.json",
+  "project_metadata": {
+    "name": "DocIndexer CLI",
+    "slug": "doc-indexer",
+    "version": "2.4.0",
+    "archetype": "cli_pipeline",
+    "summary": "High-throughput local document chunking, semantic embedding, and Qdrant vector index synchronization pipeline with incremental file watcher support.",
+    "project_description": {
+      "primary_purpose": "DocIndexer monitors multi-format documentation trees (Markdown, PDF, HTML), extracts semantic sections, computes dense embeddings, and synchronizes vector indices in real time without duplicating unchanged documents.",
+      "architecture_and_control_flow": "The CLI entrypoint invokes watcher.py to detect file changes. Modified files pass to parser.py which extracts semantic chunks and metadata. Embeddings are computed in batches via embedder.py and ingested into Qdrant using client upsert calls. Telemetry and sync state are persisted to an embedded SQLite state store.",
+      "edge_cases_and_invariants": "Embedding failures trigger exponential backoff retry. Unparseable binary documents are quarantined to a dead-letter manifest rather than halting the sync loop. Index updates are strictly idempotent based on SHA-256 document content hashes."
+    },
+    "tech_stack": [
+      {"name": "Python", "version": ">=3.11", "category": "runtime"},
+      {"name": "Click", "version": ">=8.1.0", "category": "cli"},
+      {"name": "FastEmbed", "version": ">=0.2.0", "category": "embeddings"},
+      {"name": "Qdrant Client", "version": ">=1.7.0", "category": "vector-db"},
+      {"name": "Watchdog", "version": ">=3.0.0", "category": "file-watcher"},
+      {"name": "SQLAlchemy", "version": ">=2.0.0", "category": "database"}
+    ],
+    "hardware_requirements": {
+      "gpu_recommended": false,
+      "min_ram_gb": 4,
+      "notes": "CPU-optimized ONNX runtime with support for AVX2 instructions."
+    }
+  },
+
+  "entrypoint_and_execution": {
+    "primary_entry": "cli.py",
+    "execution_type": "cli_application",
+    "sample_run_command": "docindex sync --dir ./docs --collection knowledge_base",
+    "cli_flags_or_routes": [
+      {"flag_or_route": "--dir PATH", "type": "CLI Flag", "required": true, "description": "Target root directory of documentation files to index."},
+      {"flag_or_route": "--collection NAME", "type": "CLI Flag", "required": true, "description": "Target Qdrant vector collection name."},
+      {"flag_or_route": "--watch", "type": "CLI Flag", "required": false, "description": "Run in daemon mode with continuous file-system monitoring."}
+    ],
+    "lifecycle_summary": "CLI initializes configuration and verifies database connection, starts file walker or file watcher daemon, processes unindexed documents, and outputs sync summary metrics."
+  },
+
+  "environment_and_secrets": [
+    {
+      "key": "QDRANT_URL",
+      "required": true,
+      "default_or_example": "http://localhost:6333",
+      "description": "Connection URL for the target Qdrant vector database."
+    },
+    {
+      "key": "EMBEDDING_MODEL",
+      "required": false,
+      "default_or_example": "BAAI/bge-small-en-v1.5",
+      "description": "FastEmbed model name for local vector generation."
+    }
+  ],
+
+  "mermaid_graph": "graph TD\n  subgraph Ingestion[\"File Ingestion\"]\n    A1[\"cli.py\\n(CLI Parser)\"] --> A2[\"watcher.py\\n(Watchdog Daemon)\"]\n    A2 --> B1[\"parser.py\\n(Markdown & PDF Extractor)\"]\n  end\n\n  subgraph Processing[\"Vector Pipeline\"]\n    B1 --> B2[\"chunker.py\\n(Semantic Splitting)\"]\n    B2 --> C1[\"embedder.py\\n(FastEmbed ONNX)\"]\n  end\n\n  subgraph Storage[\"Persistence\"]\n    C1 --> D1[\"qdrant_sync.py\\n(Vector Upsert)\"]\n    D1 --> D2[\"state_db.py\\n(SQLite Hash Store)\"]\n  end",
+
+  "execution_flow": [
+    {
+      "stage_id": "stage-01",
+      "step_number": 1,
+      "name": "CLI Argument Parsing & Env Verification",
+      "module_file": "cli.py",
+      "symbol_invoked": "main(dir_path: str, collection: str, watch: bool)",
+      "input_contract": "CLI options: --dir, --collection, --watch",
+      "output_contract": "IndexConfig object + active Qdrant client connection",
+      "mechanism": "Validates directory accessibility, tests database reachability, and spins up background worker threads.",
+      "code_anchor": {
+        "file": "cli.py",
+        "lines": "25-50",
+        "snippet": "@click.command()\n@click.option('--dir', required=True)\ndef main(dir, collection, watch):\n    config = load_config(dir, collection)"
+      }
+    },
+    {
+      "stage_id": "stage-02",
+      "step_number": 2,
+      "name": "Document Parsing & Semantic Chunking",
+      "module_file": "parser.py",
+      "symbol_invoked": "extract_and_chunk(file_path: Path) -> List[DocumentChunk]",
+      "input_contract": "File path (Markdown, PDF, HTML)",
+      "output_contract": "List[DocumentChunk] with content, token_count, and header_path",
+      "mechanism": "Extracts plain text and metadata headers, then executes recursive token-bounded chunking.",
+      "code_anchor": {
+        "file": "parser.py",
+        "lines": "60-95",
+        "snippet": "chunks = recursive_chunker.split_text(raw_text, chunk_size=512, overlap=64)"
+      }
+    },
+    {
+      "stage_id": "stage-03",
+      "step_number": 3,
+      "name": "Batch Vector Embedding Generation",
+      "module_file": "embedder.py",
+      "symbol_invoked": "generate_embeddings(chunks: List[DocumentChunk]) -> List[VectorRecord]",
+      "input_contract": "List of plain-text chunks",
+      "output_contract": "384-dimensional dense float32 vectors",
+      "mechanism": "Feeds batched chunk texts to FastEmbed TextEmbedding ONNX model for vectorized dense representation.",
+      "code_anchor": {
+        "file": "embedder.py",
+        "lines": "40-75",
+        "snippet": "embeddings = list(model.embed([c.content for c in chunks], batch_size=32))"
+      }
+    },
+    {
+      "stage_id": "stage-04",
+      "step_number": 4,
+      "name": "Qdrant Vector Upsert & State Commit",
+      "module_file": "qdrant_sync.py",
+      "symbol_invoked": "upsert_records(collection: str, records: List[VectorRecord])",
+      "input_contract": "Collection name + payload list with vectors and metadata",
+      "output_contract": "SyncResult: { upserted_count: int, execution_time_ms: float }",
+      "mechanism": "Sends batch points to Qdrant REST/gRPC client and records SHA-256 hash in SQLite state table.",
+      "code_anchor": {
+        "file": "qdrant_sync.py",
+        "lines": "80-112",
+        "snippet": "qdrant.upsert(collection_name=collection, points=batch_points)\nstate_db.record_indexed(doc_hash)"
+      }
+    }
+  ],
+
+  "core_data_models": [
+    {
+      "entity_name": "DocumentChunk",
+      "defined_in": "models.py:12",
+      "fields": [
+        {"name": "chunk_id", "type": "str", "description": "Deterministic UUID based on file path and chunk index."},
+        {"name": "source_path", "type": "str", "description": "Relative file path from the target root directory."},
+        {"name": "content", "type": "str", "description": "Sanitized text content for embedding generation."},
+        {"name": "token_count", "type": "int", "description": "Estimated token length of the chunk content."}
+      ]
+    },
+    {
+      "entity_name": "VectorRecord",
+      "defined_in": "models.py:38",
+      "fields": [
+        {"name": "id", "type": "str", "description": "Unique point identifier in Qdrant collection."},
+        {"name": "vector", "type": "List[float]", "description": "384-dim dense embedding array."},
+        {"name": "payload", "type": "Dict[str, Any]", "description": "Metadata attributes attached to the vector point."}
+      ]
+    }
+  ],
+
+  "endpoints_or_interfaces": [
+    {
+      "identifier": "docindex sync",
+      "type": "cli_command",
+      "summary": "Synchronize documents with vector database",
+      "details": "Walks directory, calculates file hashes, chunks new/modified files, generates embeddings, and upserts to Qdrant."
+    },
+    {
+      "identifier": "docindex watch",
+      "type": "cli_command",
+      "summary": "Continuous filesystem watcher",
+      "details": "Listens for file creation, modification, and deletion events and synchronizes incremental changes."
+    }
+  ],
+
+  "file_system_directory": [
+    {
+      "directory": "./src",
+      "purpose": "Core pipeline library and parsing utilities.",
+      "key_files": [
+        {"file": "cli.py", "role": "Click CLI interface and command routing", "loc": 110},
+        {"file": "watcher.py", "role": "Watchdog filesystem event handler", "loc": 95},
+        {"file": "parser.py", "role": "Multi-format document extractor", "loc": 180},
+        {"file": "embedder.py", "role": "FastEmbed ONNX inference wrapper", "loc": 125},
+        {"file": "qdrant_sync.py", "role": "Qdrant vector upsert client", "loc": 140}
+      ]
+    }
+  ],
+
+  "setup_and_verification_playbook": {
+    "prerequisites": ["Python >= 3.11", "pip", "Docker (for local Qdrant instance)", "FastEmbed ONNX model assets"],
+    "commands": [
+      {
+        "step": 1,
+        "title": "Start Local Qdrant Container",
+        "command": "docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant:latest"
+      },
+      {
+        "step": 2,
+        "title": "Install DocIndexer Package",
+        "command": "pip install -e ."
+      },
+      {
+        "step": 3,
+        "title": "Run Benchmark Sync",
+        "command": "docindex sync --dir ./docs --collection test_kb"
+      },
+      {
+        "step": 4,
+        "title": "Verify Collection Status",
+        "command": "curl http://localhost:6333/collections/test_kb"
+      }
+    ]
+  }
+}

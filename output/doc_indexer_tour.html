@@ -1,0 +1,1015 @@
+<!DOCTYPE html>
+<html lang="en" class="dark scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DocIndexer CLI — System Architecture Tour</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              400: '#38bdf8',
+              500: '#0ea5e9',
+              600: '#0284c7',
+            },
+            surface: {
+              base: '#070a12',
+              card: '#0f172a',
+              cardSubtle: '#131e36',
+              border: 'rgba(255, 255, 255, 0.1)',
+              borderHover: 'rgba(56, 189, 248, 0.4)',
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Highlight.js CDN for code syntax highlighting -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+
+  <!-- Core Theme & Layout Styles -->
+  <style>
+    body {
+      background-color: #060910;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(14, 165, 233, 0.15) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(99, 102, 241, 0.12) 0px, transparent 50%),
+        radial-gradient(at 50% 50%, rgba(15, 23, 42, 0.7) 0px, transparent 100%);
+      background-attachment: fixed;
+    }
+
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #060910; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #38bdf8; }
+
+    /* Mermaid SVG Responsive Fit & Dark Override */
+    .mermaid {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      width: 100%;
+      overflow-x: auto;
+      background: transparent !important;
+    }
+    .mermaid svg {
+      max-width: 100% !important;
+      height: auto !important;
+      filter: drop-shadow(0 10px 30px rgba(0, 0, 0, 0.6));
+    }
+
+    /* Interactive Node Hover & Pulse Highlight */
+    .mermaid .node {
+      cursor: pointer;
+      transition: all 0.25s ease;
+    }
+    .mermaid .node:hover rect,
+    .mermaid .node:hover polygon,
+    .mermaid .node:hover circle,
+    .mermaid .node:hover path {
+      filter: drop-shadow(0 0 10px rgba(56, 189, 248, 0.9)) !important;
+      stroke: #38bdf8 !important;
+      stroke-width: 2.5px !important;
+    }
+
+    /* Glass Effect Utilities */
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.82);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      transition: all 0.3s ease;
+    }
+    .glass-panel:hover {
+      border-color: rgba(56, 189, 248, 0.3);
+    }
+
+    @keyframes card-pulse-glow {
+      0% {
+        transform: scale(1);
+        box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.85);
+        border-color: #38bdf8;
+      }
+      25% {
+        transform: scale(1.02);
+        box-shadow: 0 0 40px 10px rgba(56, 189, 248, 0.5);
+        border-color: #38bdf8;
+      }
+      100% {
+        transform: scale(1);
+        box-shadow: 0 0 0 0 rgba(56, 189, 248, 0);
+      }
+    }
+
+    .highlight-active {
+      animation: card-pulse-glow 2.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+      border-color: #38bdf8 !important;
+      background: rgba(14, 165, 233, 0.22) !important;
+    }
+  </style>
+</head>
+
+<body class="text-slate-100 antialiased font-sans min-h-screen flex flex-col">
+
+  <!-- Optional Placeholder/Unbuilt Notice (Hidden automatically when built) -->
+  <div id="unbuilt-notice" class="hidden bg-amber-500/10 border-b border-amber-500/30 text-amber-300 px-4 py-2 text-xs text-center font-mono">
+    [!] Template preview: Run <code>python visualizer.py &lt;blueprint.json&gt;</code> to render full architecture data.
+  </div>
+
+  <!-- Top Sticky Navbar -->
+  <header class="sticky top-0 z-50 glass-panel border-b border-white/10 bg-[#070a12]/90 px-4 sm:px-6 py-3.5 transition-all">
+    <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
+      <div class="flex items-center space-x-3 truncate">
+        <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-sky-500/25 font-mono font-bold text-white text-sm flex-shrink-0">
+          //
+        </div>
+        <div class="flex items-baseline space-x-2 truncate">
+          <span class="font-bold text-base sm:text-lg text-white tracking-tight truncate">DocIndexer CLI</span>
+          <span class="text-xs font-mono text-sky-400 bg-sky-950/80 border border-sky-800/80 px-2 py-0.5 rounded-full flex-shrink-0">doc-indexer</span>
+        </div>
+      </div>
+
+      <nav class="hidden lg:flex items-center space-x-1 text-xs font-medium text-slate-300">
+        <a href="#overview" class="px-3 py-1.5 rounded-md hover:text-white hover:bg-slate-800/80 transition">Overview</a>
+        <a href="#architecture" class="px-3 py-1.5 rounded-md hover:text-white hover:bg-slate-800/80 transition">Architecture</a>
+        <a href="#execution-flow" class="px-3 py-1.5 rounded-md hover:text-white hover:bg-slate-800/80 transition">Execution Flow</a>
+        <a href="#data-models" class="px-3 py-1.5 rounded-md hover:text-white hover:bg-slate-800/80 transition">Data Models</a>
+        <a href="#directory" class="px-3 py-1.5 rounded-md hover:text-white hover:bg-slate-800/80 transition">File Structure</a>
+        <a href="#playbook" class="px-3 py-1.5 rounded-md hover:text-white hover:bg-slate-800/80 transition">Playbook</a>
+      </nav>
+
+      <div class="flex items-center space-x-3 flex-shrink-0">
+        <a href="#playbook" class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-sky-500/20 text-sky-300 border border-sky-500/40 hover:bg-sky-500/30 transition flex items-center gap-1.5 shadow-sm">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          Quick Run
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Area -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-16">
+
+    <!-- 1. Hero Section -->
+    <section id="overview" class="space-y-8 scroll-mt-24">
+      <div class="glass-panel p-6 sm:p-10 rounded-2xl relative overflow-hidden shadow-2xl">
+        <div class="absolute -right-20 -top-20 w-96 h-96 bg-sky-500/10 rounded-full blur-3xl pointer-events-none"></div>
+        <div class="absolute -left-20 -bottom-20 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+        <div class="relative z-10 space-y-6">
+          <div class="flex flex-wrap items-center gap-2.5">
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shadow-sm">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+              Autonomous Architecture Blueprint
+            </span>
+            <span class="px-3 py-1 rounded-full text-xs font-mono text-slate-300 bg-slate-800/80 border border-slate-700/80">
+              Static Visualizer
+            </span>
+          </div>
+
+          <div>
+            <h1 class="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-white tracking-tight leading-tight">
+              DocIndexer CLI
+            </h1>
+            <p class="mt-3 text-base sm:text-lg text-slate-200 max-w-5xl leading-relaxed font-normal">
+              High-throughput local document chunking, semantic embedding, and Qdrant vector index synchronization pipeline with incremental file watcher support.
+            </p>
+          </div>
+
+          <!-- Deep Purpose & Invariants Cards -->
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+            <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition shadow-sm">
+              <div class="flex items-center gap-2 text-sky-400 text-xs font-bold uppercase tracking-wider mb-2.5">
+                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                Primary Purpose
+              </div>
+              <p class="text-xs text-slate-300 leading-relaxed">DocIndexer monitors multi-format documentation trees (Markdown, PDF, HTML), extracts semantic sections, computes dense embeddings, and synchronizes vector indices in real time without duplicating unchanged documents.</p>
+            </div>
+
+            <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition shadow-sm">
+              <div class="flex items-center gap-2 text-indigo-400 text-xs font-bold uppercase tracking-wider mb-2.5">
+                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                Control Flow & Architecture
+              </div>
+              <p class="text-xs text-slate-300 leading-relaxed">The CLI entrypoint invokes watcher.py to detect file changes. Modified files pass to parser.py which extracts semantic chunks and metadata. Embeddings are computed in batches via embedder.py and ingested into Qdrant using client upsert calls. Telemetry and sync state are persisted to an embedded SQLite state store.</p>
+            </div>
+
+            <div class="p-5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-slate-700 transition shadow-sm">
+              <div class="flex items-center gap-2 text-rose-400 text-xs font-bold uppercase tracking-wider mb-2.5">
+                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                Invariants & Edge Cases
+              </div>
+              <p class="text-xs text-slate-300 leading-relaxed">Embedding failures trigger exponential backoff retry. Unparseable binary documents are quarantined to a dead-letter manifest rather than halting the sync loop. Index updates are strictly idempotent based on SHA-256 document content hashes.</p>
+            </div>
+          </div>
+
+          <!-- Tech Stack Badges -->
+          <div class="pt-3 border-t border-white/10">
+            <div class="text-xs font-semibold uppercase tracking-wider text-slate-300 mb-3 flex items-center gap-2">
+              <svg class="w-3.5 h-3.5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+              Core Technology Stack
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <div class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-sm"><span class="font-semibold text-white">Python</span><span class="opacity-60 font-mono text-[11px]">&gt;=3.11</span><span class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-black/30 opacity-75">runtime</span></div>
+<div class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border bg-slate-800 text-slate-300 border-slate-700 shadow-sm"><span class="font-semibold text-white">Click</span><span class="opacity-60 font-mono text-[11px]">&gt;=8.1.0</span><span class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-black/30 opacity-75">cli</span></div>
+<div class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border bg-slate-800 text-slate-300 border-slate-700 shadow-sm"><span class="font-semibold text-white">FastEmbed</span><span class="opacity-60 font-mono text-[11px]">&gt;=0.2.0</span><span class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-black/30 opacity-75">embeddings</span></div>
+<div class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border bg-slate-800 text-slate-300 border-slate-700 shadow-sm"><span class="font-semibold text-white">Qdrant Client</span><span class="opacity-60 font-mono text-[11px]">&gt;=1.7.0</span><span class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-black/30 opacity-75">vector-db</span></div>
+<div class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border bg-slate-800 text-slate-300 border-slate-700 shadow-sm"><span class="font-semibold text-white">Watchdog</span><span class="opacity-60 font-mono text-[11px]">&gt;=3.0.0</span><span class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-black/30 opacity-75">file-watcher</span></div>
+<div class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border bg-slate-800 text-slate-300 border-slate-700 shadow-sm"><span class="font-semibold text-white">SQLAlchemy</span><span class="opacity-60 font-mono text-[11px]">&gt;=2.0.0</span><span class="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-black/30 opacity-75">database</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Architecture Flowchart Section -->
+    <section id="architecture" class="space-y-4 scroll-mt-24">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 class="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2.5">
+            <span class="flex items-center justify-center w-7 h-7 rounded-lg bg-sky-500/20 text-sky-400 text-sm font-mono font-bold">01</span>
+            Interactive Architecture Flowchart
+          </h2>
+          <p class="text-xs text-slate-300 mt-1">Click on any flowchart node to jump directly to its matching execution card</p>
+        </div>
+        <span class="text-xs font-mono text-sky-400/80 bg-sky-950/60 border border-sky-800/40 px-2.5 py-1 rounded-md flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full bg-sky-400 animate-ping"></span>
+          Clickable Nodes Active
+        </span>
+      </div>
+
+      <div class="glass-panel p-6 sm:p-8 rounded-2xl overflow-hidden border border-slate-800 shadow-xl relative">
+        <div class="overflow-x-auto py-4">
+          <pre class="mermaid">
+graph TD
+  subgraph Ingestion["File Ingestion"]
+    A1["cli.py\n(CLI Parser)"] --> A2["watcher.py\n(Watchdog Daemon)"]
+    A2 --> B1["parser.py\n(Markdown & PDF Extractor)"]
+  end
+
+  subgraph Processing["Vector Pipeline"]
+    B1 --> B2["chunker.py\n(Semantic Splitting)"]
+    B2 --> C1["embedder.py\n(FastEmbed ONNX)"]
+  end
+
+  subgraph Storage["Persistence"]
+    C1 --> D1["qdrant_sync.py\n(Vector Upsert)"]
+    D1 --> D2["state_db.py\n(SQLite Hash Store)"]
+  end
+          </pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. Pipeline Walkthrough (Execution Flow) -->
+    <section id="execution-flow" class="space-y-6 scroll-mt-24">
+      <div>
+        <h2 class="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2.5">
+          <span class="flex items-center justify-center w-7 h-7 rounded-lg bg-indigo-500/20 text-indigo-400 text-sm font-mono font-bold">02</span>
+          Step-by-Step Execution Pipeline
+        </h2>
+        <p class="text-xs text-slate-300 mt-1">Lifecycle stages, module boundaries, IO contracts, and code anchors</p>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        
+        <div id="stage-stage-01" class="glass-panel p-6 rounded-2xl border border-slate-800 hover:border-indigo-500/30 transition-all flex flex-col justify-between space-y-4 shadow-lg group scroll-mt-24">
+          <div class="space-y-3">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-mono font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                Step 1
+              </span>
+              <div class="text-xs font-mono text-slate-400 truncate flex items-center gap-1.5">
+                <span class="text-slate-300 font-semibold">cli.py</span>
+                <span class="text-indigo-400">&rarr;</span> <span class="text-sky-300">main(dir_path: str, collection: str, watch: bool)</span>
+              </div>
+            </div>
+
+            <h3 class="text-base font-bold text-white group-hover:text-sky-300 transition-colors">
+              CLI Argument Parsing &amp; Env Verification
+            </h3>
+
+            <p class="text-xs text-slate-300 leading-relaxed">
+              Validates directory accessibility, tests database reachability, and spins up background worker threads.
+            </p>
+          </div>
+
+          
+            <div class="space-y-2 pt-2 border-t border-white/5 text-xs font-mono">
+              <div class="p-2.5 rounded-lg bg-black/40 border border-slate-800/80"><span class="text-emerald-400 font-semibold select-none">IN:</span> <span class="text-slate-300 ml-1">CLI options: --dir, --collection, --watch</span></div>
+              <div class="p-2.5 rounded-lg bg-black/40 border border-slate-800/80"><span class="text-sky-400 font-semibold select-none">OUT:</span> <span class="text-slate-300 ml-1">IndexConfig object + active Qdrant client connection</span></div>
+            </div>
+            
+
+          <!-- Code Anchor Snippet with Caption -->
+          <div class="rounded-xl overflow-hidden border border-slate-800/80 bg-[#06090f] mt-2">
+            <div class="flex items-center justify-between px-3 py-1.5 bg-slate-900/60 border-b border-slate-800/80 text-[11px] font-mono text-slate-400">
+              <span class="flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+                Anchor: <strong class="text-slate-300">cli.py:25-50</strong>
+              </span>
+              <span class="text-[10px] uppercase font-semibold text-slate-500 tracking-wider">Python</span>
+            </div>
+            <pre class="p-3 text-xs font-mono overflow-x-auto text-sky-200/90 leading-snug"><code class="language-python">@click.command()
+@click.option(&#x27;--dir&#x27;, required=True)
+def main(dir, collection, watch):
+    config = load_config(dir, collection)</code></pre>
+          </div>
+        </div>
+        
+
+        <div id="stage-stage-02" class="glass-panel p-6 rounded-2xl border border-slate-800 hover:border-indigo-500/30 transition-all flex flex-col justify-between space-y-4 shadow-lg group scroll-mt-24">
+          <div class="space-y-3">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-mono font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                Step 2
+              </span>
+              <div class="text-xs font-mono text-slate-400 truncate flex items-center gap-1.5">
+                <span class="text-slate-300 font-semibold">parser.py</span>
+                <span class="text-indigo-400">&rarr;</span> <span class="text-sky-300">extract_and_chunk(file_path: Path) -&gt; List[DocumentChunk]</span>
+              </div>
+            </div>
+
+            <h3 class="text-base font-bold text-white group-hover:text-sky-300 transition-colors">
+              Document Parsing &amp; Semantic Chunking
+            </h3>
+
+            <p class="text-xs text-slate-300 leading-relaxed">
+              Extracts plain text and metadata headers, then executes recursive token-bounded chunking.
+            </p>
+          </div>
+
+          
+            <div class="space-y-2 pt-2 border-t border-white/5 text-xs font-mono">
+              <div class="p-2.5 rounded-lg bg-black/40 border border-slate-800/80"><span class="text-emerald-400 font-semibold select-none">IN:</span> <span class="text-slate-300 ml-1">File path (Markdown, PDF, HTML)</span></div>
+              <div class="p-2.5 rounded-lg bg-black/40 border border-slate-800/80"><span class="text-sky-400 font-semibold select-none">OUT:</span> <span class="text-slate-300 ml-1">List[DocumentChunk] with content, token_count, and header_path</span></div>
+            </div>
+            
+
+          <!-- Code Anchor Snippet with Caption -->
+          <div class="rounded-xl overflow-hidden border border-slate-800/80 bg-[#06090f] mt-2">
+            <div class="flex items-center justify-between px-3 py-1.5 bg-slate-900/60 border-b border-slate-800/80 text-[11px] font-mono text-slate-400">
+              <span class="flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+                Anchor: <strong class="text-slate-300">parser.py:60-95</strong>
+              </span>
+              <span class="text-[10px] uppercase font-semibold text-slate-500 tracking-wider">Python</span>
+            </div>
+            <pre class="p-3 text-xs font-mono overflow-x-auto text-sky-200/90 leading-snug"><code class="language-python">chunks = recursive_chunker.split_text(raw_text, chunk_size=512, overlap=64)</code></pre>
+          </div>
+        </div>
+        
+
+        <div id="stage-stage-03" class="glass-panel p-6 rounded-2xl border border-slate-800 hover:border-indigo-500/30 transition-all flex flex-col justify-between space-y-4 shadow-lg group scroll-mt-24">
+          <div class="space-y-3">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-mono font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                Step 3
+              </span>
+              <div class="text-xs font-mono text-slate-400 truncate flex items-center gap-1.5">
+                <span class="text-slate-300 font-semibold">embedder.py</span>
+                <span class="text-indigo-400">&rarr;</span> <span class="text-sky-300">generate_embeddings(chunks: List[DocumentChunk]) -&gt; List[VectorRecord]</span>
+              </div>
+            </div>
+
+            <h3 class="text-base font-bold text-white group-hover:text-sky-300 transition-colors">
+              Batch Vector Embedding Generation
+            </h3>
+
+            <p class="text-xs text-slate-300 leading-relaxed">
+              Feeds batched chunk texts to FastEmbed TextEmbedding ONNX model for vectorized dense representation.
+            </p>
+          </div>
+
+          
+            <div class="space-y-2 pt-2 border-t border-white/5 text-xs font-mono">
+              <div class="p-2.5 rounded-lg bg-black/40 border border-slate-800/80"><span class="text-emerald-400 font-semibold select-none">IN:</span> <span class="text-slate-300 ml-1">List of plain-text chunks</span></div>
+              <div class="p-2.5 rounded-lg bg-black/40 border border-slate-800/80"><span class="text-sky-400 font-semibold select-none">OUT:</span> <span class="text-slate-300 ml-1">384-dimensional dense float32 vectors</span></div>
+            </div>
+            
+
+          <!-- Code Anchor Snippet with Caption -->
+          <div class="rounded-xl overflow-hidden border border-slate-800/80 bg-[#06090f] mt-2">
+            <div class="flex items-center justify-between px-3 py-1.5 bg-slate-900/60 border-b border-slate-800/80 text-[11px] font-mono text-slate-400">
+              <span class="flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+                Anchor: <strong class="text-slate-300">embedder.py:40-75</strong>
+              </span>
+              <span class="text-[10px] uppercase font-semibold text-slate-500 tracking-wider">Python</span>
+            </div>
+            <pre class="p-3 text-xs font-mono overflow-x-auto text-sky-200/90 leading-snug"><code class="language-python">embeddings = list(model.embed([c.content for c in chunks], batch_size=32))</code></pre>
+          </div>
+        </div>
+        
+
+        <div id="stage-stage-04" class="glass-panel p-6 rounded-2xl border border-slate-800 hover:border-indigo-500/30 transition-all flex flex-col justify-between space-y-4 shadow-lg group scroll-mt-24">
+          <div class="space-y-3">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-mono font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                Step 4
+              </span>
+              <div class="text-xs font-mono text-slate-400 truncate flex items-center gap-1.5">
+                <span class="text-slate-300 font-semibold">qdrant_sync.py</span>
+                <span class="text-indigo-400">&rarr;</span> <span class="text-sky-300">upsert_records(collection: str, records: List[VectorRecord])</span>
+              </div>
+            </div>
+
+            <h3 class="text-base font-bold text-white group-hover:text-sky-300 transition-colors">
+              Qdrant Vector Upsert &amp; State Commit
+            </h3>
+
+            <p class="text-xs text-slate-300 leading-relaxed">
+              Sends batch points to Qdrant REST/gRPC client and records SHA-256 hash in SQLite state table.
+            </p>
+          </div>
+
+          
+            <div class="space-y-2 pt-2 border-t border-white/5 text-xs font-mono">
+              <div class="p-2.5 rounded-lg bg-black/40 border border-slate-800/80"><span class="text-emerald-400 font-semibold select-none">IN:</span> <span class="text-slate-300 ml-1">Collection name + payload list with vectors and metadata</span></div>
+              <div class="p-2.5 rounded-lg bg-black/40 border border-slate-800/80"><span class="text-sky-400 font-semibold select-none">OUT:</span> <span class="text-slate-300 ml-1">SyncResult: { upserted_count: int, execution_time_ms: float }</span></div>
+            </div>
+            
+
+          <!-- Code Anchor Snippet with Caption -->
+          <div class="rounded-xl overflow-hidden border border-slate-800/80 bg-[#06090f] mt-2">
+            <div class="flex items-center justify-between px-3 py-1.5 bg-slate-900/60 border-b border-slate-800/80 text-[11px] font-mono text-slate-400">
+              <span class="flex items-center gap-1.5">
+                <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+                Anchor: <strong class="text-slate-300">qdrant_sync.py:80-112</strong>
+              </span>
+              <span class="text-[10px] uppercase font-semibold text-slate-500 tracking-wider">Python</span>
+            </div>
+            <pre class="p-3 text-xs font-mono overflow-x-auto text-sky-200/90 leading-snug"><code class="language-python">qdrant.upsert(collection_name=collection, points=batch_points)
+state_db.record_indexed(doc_hash)</code></pre>
+          </div>
+        </div>
+        
+      </div>
+    </section>
+
+    <!-- 4. Core Data Models -->
+    <section id="data-models" class="space-y-6 scroll-mt-24">
+      <div>
+        <h2 class="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2.5">
+          <span class="flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 text-sm font-mono font-bold">03</span>
+          Core Data Models & Schemas
+        </h2>
+        <p class="text-xs text-slate-300 mt-1">Pydantic models, data transfer objects, and field validation contracts</p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+        
+        <div class="glass-panel rounded-2xl p-5 border border-slate-800 shadow-lg flex flex-col justify-between space-y-4">
+          <div class="space-y-3">
+            <div class="flex items-center justify-between border-b border-white/5 pb-3">
+              <h3 class="text-base font-bold text-white font-mono flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                DocumentChunk
+              </h3>
+              <span class="text-xs font-mono text-slate-400 bg-slate-800/60 px-2 py-0.5 rounded border border-slate-700/60">
+                models.py:12
+              </span>
+            </div>
+
+            <div class="overflow-x-auto rounded-xl border border-slate-800/80 bg-[#06090f]">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-800 bg-slate-900/60">
+                    <th class="py-2 px-3">Field</th>
+                    <th class="py-2 px-3">Type</th>
+                    <th class="py-2 px-3">Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  
+                <tr class="border-b border-slate-800/60 last:border-0 hover:bg-slate-800/30 transition">
+                  <td class="py-2.5 px-3 font-mono text-xs font-semibold text-white whitespace-nowrap">chunk_id</td>
+                  <td class="py-2.5 px-3 font-mono text-[11px] whitespace-nowrap">
+                    <span class="px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/40">str</span>
+                  </td>
+                  <td class="py-2.5 px-3 text-xs text-slate-300 leading-relaxed">Deterministic UUID based on file path and chunk index.</td>
+                </tr>
+                
+
+                <tr class="border-b border-slate-800/60 last:border-0 hover:bg-slate-800/30 transition">
+                  <td class="py-2.5 px-3 font-mono text-xs font-semibold text-white whitespace-nowrap">source_path</td>
+                  <td class="py-2.5 px-3 font-mono text-[11px] whitespace-nowrap">
+                    <span class="px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/40">str</span>
+                  </td>
+                  <td class="py-2.5 px-3 text-xs text-slate-300 leading-relaxed">Relative file path from the target root directory.</td>
+                </tr>
+                
+
+                <tr class="border-b border-slate-800/60 last:border-0 hover:bg-slate-800/30 transition">
+                  <td class="py-2.5 px-3 font-mono text-xs font-semibold text-white whitespace-nowrap">content</td>
+                  <td class="py-2.5 px-3 font-mono text-[11px] whitespace-nowrap">
+                    <span class="px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/40">str</span>
+                  </td>
+                  <td class="py-2.5 px-3 text-xs text-slate-300 leading-relaxed">Sanitized text content for embedding generation.</td>
+                </tr>
+                
+
+                <tr class="border-b border-slate-800/60 last:border-0 hover:bg-slate-800/30 transition">
+                  <td class="py-2.5 px-3 font-mono text-xs font-semibold text-white whitespace-nowrap">token_count</td>
+                  <td class="py-2.5 px-3 font-mono text-[11px] whitespace-nowrap">
+                    <span class="px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/40">int</span>
+                  </td>
+                  <td class="py-2.5 px-3 text-xs text-slate-300 leading-relaxed">Estimated token length of the chunk content.</td>
+                </tr>
+                
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        
+
+        <div class="glass-panel rounded-2xl p-5 border border-slate-800 shadow-lg flex flex-col justify-between space-y-4">
+          <div class="space-y-3">
+            <div class="flex items-center justify-between border-b border-white/5 pb-3">
+              <h3 class="text-base font-bold text-white font-mono flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                VectorRecord
+              </h3>
+              <span class="text-xs font-mono text-slate-400 bg-slate-800/60 px-2 py-0.5 rounded border border-slate-700/60">
+                models.py:38
+              </span>
+            </div>
+
+            <div class="overflow-x-auto rounded-xl border border-slate-800/80 bg-[#06090f]">
+              <table class="w-full text-left border-collapse">
+                <thead>
+                  <tr class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-800 bg-slate-900/60">
+                    <th class="py-2 px-3">Field</th>
+                    <th class="py-2 px-3">Type</th>
+                    <th class="py-2 px-3">Description</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  
+                <tr class="border-b border-slate-800/60 last:border-0 hover:bg-slate-800/30 transition">
+                  <td class="py-2.5 px-3 font-mono text-xs font-semibold text-white whitespace-nowrap">id</td>
+                  <td class="py-2.5 px-3 font-mono text-[11px] whitespace-nowrap">
+                    <span class="px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/40">str</span>
+                  </td>
+                  <td class="py-2.5 px-3 text-xs text-slate-300 leading-relaxed">Unique point identifier in Qdrant collection.</td>
+                </tr>
+                
+
+                <tr class="border-b border-slate-800/60 last:border-0 hover:bg-slate-800/30 transition">
+                  <td class="py-2.5 px-3 font-mono text-xs font-semibold text-white whitespace-nowrap">vector</td>
+                  <td class="py-2.5 px-3 font-mono text-[11px] whitespace-nowrap">
+                    <span class="px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/40">List[float]</span>
+                  </td>
+                  <td class="py-2.5 px-3 text-xs text-slate-300 leading-relaxed">384-dim dense embedding array.</td>
+                </tr>
+                
+
+                <tr class="border-b border-slate-800/60 last:border-0 hover:bg-slate-800/30 transition">
+                  <td class="py-2.5 px-3 font-mono text-xs font-semibold text-white whitespace-nowrap">payload</td>
+                  <td class="py-2.5 px-3 font-mono text-[11px] whitespace-nowrap">
+                    <span class="px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/40">Dict[str, Any]</span>
+                  </td>
+                  <td class="py-2.5 px-3 text-xs text-slate-300 leading-relaxed">Metadata attributes attached to the vector point.</td>
+                </tr>
+                
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        
+      </div>
+    </section>
+
+    <!-- 5. Component Directory -->
+    <section id="directory" class="space-y-6 scroll-mt-24">
+      <div>
+        <h2 class="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2.5">
+          <span class="flex items-center justify-center w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 text-sm font-mono font-bold">04</span>
+          File System & Module Breakdown
+        </h2>
+        <p class="text-xs text-slate-300 mt-1">Repository layout, file roles, and lines of code (LOC)</p>
+      </div>
+
+      <div class="glass-panel rounded-2xl overflow-hidden border border-slate-800 shadow-xl">
+        
+        <div class="p-6 border-b border-slate-800 last:border-0">
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div class="flex items-center gap-2.5">
+              <span class="px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono text-xs font-bold">
+                ./src
+              </span>
+              <span class="text-xs text-slate-300">Core pipeline library and parsing utilities.</span>
+            </div>
+            <span class="text-xs font-mono text-amber-300/80 bg-amber-950/40 border border-amber-800/40 px-2 py-0.5 rounded">Total: 650 LOC</span>
+          </div>
+
+          <div class="overflow-x-auto rounded-xl border border-slate-800 bg-[#06090f]">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-800 bg-slate-900/80">
+                  <th class="py-2.5 px-4">File Name</th>
+                  <th class="py-2.5 px-4">Architecture Function & Role</th>
+                  <th class="py-2.5 px-4 text-right">LOC</th>
+                </tr>
+              </thead>
+              <tbody>
+                
+                <tr class="border-b border-slate-800/60 last:border-0 hover:bg-slate-800/30 transition">
+                  <td class="py-3 px-4 font-mono text-xs font-bold text-sky-300 flex items-center gap-2 whitespace-nowrap">
+                    <svg class="w-4 h-4 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    cli.py
+                  </td>
+                  <td class="py-3 px-4 text-xs text-slate-300">Click CLI interface and command routing</td>
+                  <td class="py-3 px-4 font-mono text-xs text-amber-400 font-semibold text-right whitespace-nowrap">110</td>
+                </tr>
+                
+
+                <tr class="border-b border-slate-800/60 last:border-0 hover:bg-slate-800/30 transition">
+                  <td class="py-3 px-4 font-mono text-xs font-bold text-sky-300 flex items-center gap-2 whitespace-nowrap">
+                    <svg class="w-4 h-4 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    watcher.py
+                  </td>
+                  <td class="py-3 px-4 text-xs text-slate-300">Watchdog filesystem event handler</td>
+                  <td class="py-3 px-4 font-mono text-xs text-amber-400 font-semibold text-right whitespace-nowrap">95</td>
+                </tr>
+                
+
+                <tr class="border-b border-slate-800/60 last:border-0 hover:bg-slate-800/30 transition">
+                  <td class="py-3 px-4 font-mono text-xs font-bold text-sky-300 flex items-center gap-2 whitespace-nowrap">
+                    <svg class="w-4 h-4 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    parser.py
+                  </td>
+                  <td class="py-3 px-4 text-xs text-slate-300">Multi-format document extractor</td>
+                  <td class="py-3 px-4 font-mono text-xs text-amber-400 font-semibold text-right whitespace-nowrap">180</td>
+                </tr>
+                
+
+                <tr class="border-b border-slate-800/60 last:border-0 hover:bg-slate-800/30 transition">
+                  <td class="py-3 px-4 font-mono text-xs font-bold text-sky-300 flex items-center gap-2 whitespace-nowrap">
+                    <svg class="w-4 h-4 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    embedder.py
+                  </td>
+                  <td class="py-3 px-4 text-xs text-slate-300">FastEmbed ONNX inference wrapper</td>
+                  <td class="py-3 px-4 font-mono text-xs text-amber-400 font-semibold text-right whitespace-nowrap">125</td>
+                </tr>
+                
+
+                <tr class="border-b border-slate-800/60 last:border-0 hover:bg-slate-800/30 transition">
+                  <td class="py-3 px-4 font-mono text-xs font-bold text-sky-300 flex items-center gap-2 whitespace-nowrap">
+                    <svg class="w-4 h-4 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    qdrant_sync.py
+                  </td>
+                  <td class="py-3 px-4 text-xs text-slate-300">Qdrant vector upsert client</td>
+                  <td class="py-3 px-4 font-mono text-xs text-amber-400 font-semibold text-right whitespace-nowrap">140</td>
+                </tr>
+                
+              </tbody>
+            </table>
+          </div>
+        </div>
+        
+      </div>
+    </section>
+
+    <!-- 6. Setup & Verification Playbook -->
+    <section id="playbook" class="space-y-6 pb-12 scroll-mt-24">
+      <div>
+        <h2 class="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2.5">
+          <span class="flex items-center justify-center w-7 h-7 rounded-lg bg-rose-500/20 text-rose-400 text-sm font-mono font-bold">05</span>
+          Setup & Verification Playbook
+        </h2>
+        <p class="text-xs text-slate-300 mt-1">Step-by-step local verification commands with single-click copy</p>
+      </div>
+
+      <div class="glass-panel p-6 sm:p-8 rounded-2xl border border-slate-800 shadow-xl">
+        
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div class="lg:col-span-1 space-y-4">
+        <h3 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+          <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          Prerequisites
+        </h3>
+        <ul class="space-y-2.5 p-4 rounded-xl bg-slate-900/60 border border-slate-800">
+          <li class="flex items-start gap-2 text-xs text-slate-300"><svg class="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span>Python &gt;= 3.11</span></li>
+<li class="flex items-start gap-2 text-xs text-slate-300"><svg class="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span>pip</span></li>
+<li class="flex items-start gap-2 text-xs text-slate-300"><svg class="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span>Docker (for local Qdrant instance)</span></li>
+<li class="flex items-start gap-2 text-xs text-slate-300"><svg class="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg><span>FastEmbed ONNX model assets</span></li>
+        </ul>
+      </div>
+
+      <div class="lg:col-span-2 space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+            <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+            Verification Playbook
+          </h3>
+          
+    <button class="copy-btn px-3 py-1.5 text-xs font-semibold text-sky-400 bg-sky-950/60 hover:bg-sky-900/60 rounded-lg border border-sky-800/60 transition flex items-center gap-1.5 shadow-sm" data-clipboard="# Step 1: Start Local Qdrant Container
+docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant:latest
+
+# Step 2: Install DocIndexer Package
+pip install -e .
+
+# Step 3: Run Benchmark Sync
+docindex sync --dir ./docs --collection test_kb
+
+# Step 4: Verify Collection Status
+curl http://localhost:6333/collections/test_kb">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
+      Copy All Steps
+    </button>
+    
+        </div>
+        <div class="space-y-3">
+          
+            <div class="rounded-xl overflow-hidden border border-slate-800 bg-[#06090f] shadow-md">
+              <div class="flex items-center justify-between px-4 py-2 bg-slate-900/80 border-b border-slate-800">
+                <div class="flex items-center gap-2">
+                  <span class="w-5 h-5 rounded-full bg-rose-500/20 text-rose-400 text-xs font-mono font-bold flex items-center justify-center">
+                    1
+                  </span>
+                  <span class="text-xs font-semibold text-white">Start Local Qdrant Container</span>
+                </div>
+                <button class="copy-btn px-2.5 py-1 text-[11px] font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded border border-slate-700 transition flex items-center gap-1" data-clipboard="docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant:latest">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                  Copy
+                </button>
+              </div>
+              <pre class="p-3 text-xs font-mono overflow-x-auto text-emerald-300"><code class="language-bash">docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant:latest</code></pre>
+            </div>
+            
+            <div class="rounded-xl overflow-hidden border border-slate-800 bg-[#06090f] shadow-md">
+              <div class="flex items-center justify-between px-4 py-2 bg-slate-900/80 border-b border-slate-800">
+                <div class="flex items-center gap-2">
+                  <span class="w-5 h-5 rounded-full bg-rose-500/20 text-rose-400 text-xs font-mono font-bold flex items-center justify-center">
+                    2
+                  </span>
+                  <span class="text-xs font-semibold text-white">Install DocIndexer Package</span>
+                </div>
+                <button class="copy-btn px-2.5 py-1 text-[11px] font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded border border-slate-700 transition flex items-center gap-1" data-clipboard="pip install -e .">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                  Copy
+                </button>
+              </div>
+              <pre class="p-3 text-xs font-mono overflow-x-auto text-emerald-300"><code class="language-bash">pip install -e .</code></pre>
+            </div>
+            
+            <div class="rounded-xl overflow-hidden border border-slate-800 bg-[#06090f] shadow-md">
+              <div class="flex items-center justify-between px-4 py-2 bg-slate-900/80 border-b border-slate-800">
+                <div class="flex items-center gap-2">
+                  <span class="w-5 h-5 rounded-full bg-rose-500/20 text-rose-400 text-xs font-mono font-bold flex items-center justify-center">
+                    3
+                  </span>
+                  <span class="text-xs font-semibold text-white">Run Benchmark Sync</span>
+                </div>
+                <button class="copy-btn px-2.5 py-1 text-[11px] font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded border border-slate-700 transition flex items-center gap-1" data-clipboard="docindex sync --dir ./docs --collection test_kb">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                  Copy
+                </button>
+              </div>
+              <pre class="p-3 text-xs font-mono overflow-x-auto text-emerald-300"><code class="language-bash">docindex sync --dir ./docs --collection test_kb</code></pre>
+            </div>
+            
+            <div class="rounded-xl overflow-hidden border border-slate-800 bg-[#06090f] shadow-md">
+              <div class="flex items-center justify-between px-4 py-2 bg-slate-900/80 border-b border-slate-800">
+                <div class="flex items-center gap-2">
+                  <span class="w-5 h-5 rounded-full bg-rose-500/20 text-rose-400 text-xs font-mono font-bold flex items-center justify-center">
+                    4
+                  </span>
+                  <span class="text-xs font-semibold text-white">Verify Collection Status</span>
+                </div>
+                <button class="copy-btn px-2.5 py-1 text-[11px] font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 hover:text-white rounded border border-slate-700 transition flex items-center gap-1" data-clipboard="curl http://localhost:6333/collections/test_kb">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                  Copy
+                </button>
+              </div>
+              <pre class="p-3 text-xs font-mono overflow-x-auto text-emerald-300"><code class="language-bash">curl http://localhost:6333/collections/test_kb</code></pre>
+            </div>
+            
+        </div>
+      </div>
+    </div>
+    
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-white/10 py-8 text-center text-xs text-slate-400 bg-[#060910]">
+    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="flex items-center space-x-2">
+        <span class="font-mono text-sky-400 font-bold">// DocIndexer CLI</span>
+        <span>•</span>
+        <span>Architecture Tour Visualizer</span>
+      </div>
+      <div class="text-slate-400">
+        Generated statically with zero runtime dependencies.
+      </div>
+    </div>
+  </footer>
+
+  <!-- Mermaid.js ESM Initializer & Generic Node Click Router -->
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'dark',
+      securityLevel: 'loose',
+      themeVariables: {
+        darkMode: true,
+        background: '#0f172a',
+        primaryColor: '#0284c7',
+        primaryTextColor: '#f8fafc',
+        primaryBorderColor: '#38bdf8',
+        lineColor: '#64748b',
+        secondaryColor: '#312e81',
+        tertiaryColor: '#1e293b'
+      },
+      fontFamily: 'Inter, sans-serif'
+    });
+
+    async function initInteractiveMermaid() {
+      const mermaidContainer = document.querySelector('.mermaid');
+      if (!mermaidContainer) return;
+
+      try {
+        await mermaid.run({ nodes: [mermaidContainer] });
+      } catch (err) {
+        console.error('Mermaid render error:', err);
+      }
+
+      setupMermaidClickDelegation(mermaidContainer);
+    }
+
+    function setupMermaidClickDelegation(container) {
+      // Index all searchable targets from DOM
+      const stageCards = Array.from(document.querySelectorAll('[id^="stage-"]')).map(card => {
+        const id = card.id;
+        const titleEl = card.querySelector('h3');
+        const title = titleEl ? titleEl.textContent.trim().toLowerCase() : '';
+        const rawText = (card.textContent || '').toLowerCase();
+        
+        // Extract symbols and tokens
+        const symbols = Array.from(card.querySelectorAll('code')).map(el => {
+          return el.textContent.trim().toLowerCase().replace(/\(.*?\)/g, '').replace(/[^a-z0-9_]/g, '');
+        }).filter(s => s.length >= 3);
+
+        return {
+          id: id,
+          element: card,
+          title: titleEl ? titleEl.textContent.trim() : id,
+          symbols: symbols,
+          rawText: rawText
+        };
+      });
+
+      const svg = container.querySelector('svg');
+      if (!svg) return;
+
+      const nodes = svg.querySelectorAll('g.node, .node');
+      nodes.forEach(node => {
+        node.style.cursor = 'pointer';
+        node.style.pointerEvents = 'all';
+      });
+
+      container.addEventListener('click', (e) => {
+        const node = e.target.closest('g.node, .node, g[id^="flowchart-"]');
+        if (!node) return;
+
+        const nodeText = (node.textContent || '').trim();
+        const cleanText = nodeText.toLowerCase();
+        const tokens = cleanText.replace(/[^a-z0-9_]/g, ' ').split(/\s+/).filter(t => t.length >= 3);
+
+        let matchedCard = null;
+
+        // 1. Direct symbol / function name match
+        for (const card of stageCards) {
+          for (const sym of card.symbols) {
+            if (sym && (cleanText.includes(sym) || tokens.includes(sym))) {
+              matchedCard = card;
+              break;
+            }
+          }
+          if (matchedCard) break;
+        }
+
+        // 2. Token overlap match
+        if (!matchedCard) {
+          for (const card of stageCards) {
+            const matches = tokens.filter(t => card.rawText.includes(t));
+            if (matches.length >= 2) {
+              matchedCard = card;
+              break;
+            }
+          }
+        }
+
+        // 3. Fallback: single token match against stage IDs or titles
+        if (!matchedCard && tokens.length > 0) {
+          for (const t of tokens) {
+            matchedCard = stageCards.find(c => c.id.toLowerCase().includes(t) || c.title.toLowerCase().includes(t));
+            if (matchedCard) break;
+          }
+        }
+
+        if (matchedCard) {
+          document.querySelectorAll('.highlight-active').forEach(el => el.classList.remove('highlight-active'));
+
+          matchedCard.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          matchedCard.element.classList.remove('highlight-active');
+          void matchedCard.element.offsetWidth; // trigger reflow
+          matchedCard.element.classList.add('highlight-active');
+        }
+      });
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initInteractiveMermaid);
+    } else {
+      initInteractiveMermaid();
+    }
+  </script>
+
+  <!-- Highlight.js & Clipboard Copy Script -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Check if raw unbuilt template is loaded
+      if (document.body.innerHTML.includes('DocIndexer CLI')) {
+        const notice = document.getElementById('unbuilt-notice');
+        if (notice) notice.classList.remove('hidden');
+      }
+
+      // Highlight syntax on all pre code blocks
+      hljs.highlightAll();
+
+      async function copyText(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+          return navigator.clipboard.writeText(text);
+        } else {
+          const textArea = document.createElement("textarea");
+          textArea.value = text;
+          textArea.style.position = "fixed";
+          textArea.style.left = "-999999px";
+          textArea.style.top = "-999999px";
+          document.body.appendChild(textArea);
+          textArea.focus();
+          textArea.select();
+          return new Promise((resolve, reject) => {
+            document.execCommand('copy') ? resolve() : reject(new Error('execCommand copy failed'));
+            textArea.remove();
+          });
+        }
+      }
+
+      // Setup copy button listeners
+      document.querySelectorAll('.copy-btn').forEach(button => {
+        button.addEventListener('click', async () => {
+          const textToCopy = button.getAttribute('data-clipboard');
+          if (!textToCopy) return;
+
+          try {
+            await copyText(textToCopy);
+            const originalHTML = button.innerHTML;
+            button.innerHTML = `
+              <svg class="w-3.5 h-3.5 text-emerald-400 inline mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+              <span class="text-emerald-400 font-semibold">Copied!</span>
+            `;
+            button.classList.add('border-emerald-500/50', 'bg-emerald-500/10');
+
+            setTimeout(() => {
+              button.innerHTML = originalHTML;
+              button.classList.remove('border-emerald-500/50', 'bg-emerald-500/10');
+            }, 2000);
+          } catch (err) {
+            console.error('Failed to copy text: ', err);
+          }
+        });
+      });
+    });
+  </script>
+</body>
+</html>
