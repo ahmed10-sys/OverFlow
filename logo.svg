@@ -1,0 +1,9 @@
+<svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="40" height="40" rx="10" fill="#0f172a" stroke="#1e293b" stroke-width="1.5"/>
+  <!-- Left Code Bracket -->
+  <path d="M14 11C11 11 10 13 10 16V18C10 19.5 8.5 20 7 20C8.5 20 10 20.5 10 22V24C10 27 11 29 14 29" stroke="#6366f1" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Right Code Bracket -->
+  <path d="M26 11C29 11 30 13 30 16V18C30 19.5 31.5 20 33 20C31.5 20 30 20.5 30 22V24C30 27 29 29 26 29" stroke="#6366f1" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Zero Core / Lens -->
+  <ellipse cx="20" cy="20" rx="4" ry="7" stroke="#38bdf8" stroke-width="2"/>
+</svg>
